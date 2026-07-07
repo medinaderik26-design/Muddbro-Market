@@ -1,0 +1,38 @@
+name: Deploy Muddbro Market to GitHub Pages
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'market.html'
+      - 'index.html'
+      - '.github/workflows/deploy-market.yml'
+  workflow_dispatch:  # Allows manual trigger
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'  # Deploy entire repo (or change to 'market' folder if you prefer)
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Show deployment URL
+        run: echo "✅ Market deployed at ${{ steps.deployment.outputs.page_url }}"
