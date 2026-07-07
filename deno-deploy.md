@@ -1,0 +1,16 @@
+
+### 2. **Create `deno.json`**
+```json
+{
+  "name": "muddbro-nft-store",
+  "version": "1.0.0",
+  "description": "MUDDBRO NFT Store on-chain marketplace",
+  "main": "store.ts",
+  "imports": {
+    "std/": "https://deno.land/std@0.208.0/"
+  },
+  "tasks": {
+    "serve": "deno run --allow-net store.ts",
+    "serve-dev": "deno run --allow-net --watch store.ts"
+  }
+}
