@@ -1,49 +1,4 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
-
-// ─── Genesis Catalog ────────────────────────────────────────────────────────
-const CATALOG = [
-  { key: "sun-forged-molten-crown", name: "Sun-Forged Molten Crown", index: 1, image: "https://media.base44.com/images/public/6a4020251d35ee93ec909dfa/d38196aa1_image.jpg", tribe: "Sun-Forged", rarity: "Genesis Prime", mining_bonus: 70, companion_bonus: 25, racing_bonus: 12, durability: 100, ability: "Eternal Flame", desc: "A crown of living lava that has never cooled since the world's first forging.", price_mudd: 5000, minted_onchain: true, nft_address: "0QCGwqBbWLOEst04RpjaFD2C3G1QS2uWXkxFJ7xDFwLwYrq8", is_house: true },
-  // ... (keep the rest of your catalog items exactly as they were)
-];
-
-const COLLECTION_ADDRESS = "kQAid8tfDNbNLLHWDInRbhGK_Rfv_ouRtL7ocitfMv07KJ2b";
-const G0_WALLET = "0QAG3lJZz24VOz6eicLTqP5M-YtfKJ96Naq3FPUz548Pcsw8";
-const MARKET_FEE_BPS = 500;
-const HOUSE_TELEGRAM_ID = "muddbro_house";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Content-Type": "application/json"
-};
-
-Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-
-  if (req.method === "POST") {
-    try {
-      const body = await req.json();
-      const base44 = createClientFromRequest(req);
-      const action = body.action || "";
-
-      // ... (keep all your existing API endpoints exactly as they were - identify, link_wallet, request_mint, etc.)
-
-      return new Response(JSON.stringify({ ok: false, error: "unknown action" }), { status: 400, headers: corsHeaders });
-    } catch (e) {
-      console.error("muddbroNftStore API error:", e);
-      return new Response(JSON.stringify({ ok: false, error: String(e) }), { status: 500, headers: corsHeaders });
-    }
-  }
-
-  // Serve the store page
-  return new Response(STORE_HTML, { 
-    headers: { "Content-Type": "text/html; charset=utf-8" } 
-  });
-});
-
-// ─── Full Frontend HTML (cleaned) ────────────────────────────────────────
-const STORE_HTML = `<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -51,10 +6,83 @@ const STORE_HTML = `<!DOCTYPE html>
 <title>MUDDBRO // NFT FORGE</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-/* Your existing styles from before - kept clean */
-</style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{--cyan:#a0f0ff;--gold:#ffd700;--dark:#05050a;--dark2:#0a0a1a;--text:#e0f0ff;--border:#2a3550;--card:rgba(12,15,28,.9);--danger:#ff4444;--ok:#44ff88}
+html,body{width:100%;min-height:100vh;background:var(--dark);color:var(--text);font-family:'Courier New',monospace;overflow-x:hidden}
+body{background-image:radial-gradient(circle at 20% 10%,rgba(160,240,255,.06) 0%,transparent 45%),radial-gradient(circle at 80% 90%,rgba(255,215,0,.05) 0%,transparent 45%),linear-gradient(180deg,var(--dark),var(--dark2));min-height:100vh}
+.grid-overlay{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.15;background-image:linear-gradient(rgba(160,240,255,.5) 1px,transparent 1px),linear-gradient(90deg,rgba(160,240,255,.5) 1px,transparent 1px);background-size:40px 40px;mask-image:radial-gradient(circle at 50% 0%,black 0%,transparent 70%)}
+.wrap{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 16px 60px}
+.hero{padding:36px 0 20px;text-align:center}
+.hero h1{font-size:clamp(28px,6vw,46px);letter-spacing:6px;color:var(--cyan);text-shadow:0 0 20px rgba(160,240,255,.5);text-transform:uppercase}
+.hero h1 span{color:var(--gold);text-shadow:0 0 20px rgba(255,215,0,.5)}
+.hero p{margin-top:8px;color:rgba(160,240,255,.5);font-size:12px;letter-spacing:2px;text-transform:uppercase}
+.identity-bar{display:flex;gap:8px;justify-content:center;align-items:center;margin-top:18px;flex-wrap:wrap}
+.identity-bar input,.market-form input{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:6px;padding:9px 12px;color:var(--text);font-family:'Courier New',monospace;font-size:12px}
+.identity-bar input{width:180px}.market-form input{width:220px}
+.identity-bar input:focus,.market-form input:focus{outline:none;border-color:var(--cyan)}
+.btn{border:1px solid var(--cyan);background:rgba(160,240,255,.06);color:var(--cyan);padding:9px 18px;border-radius:6px;font-family:'Courier New',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all .15s}
+.btn:hover{background:rgba(160,240,255,.15);box-shadow:0 0 12px rgba(160,240,255,.3)}
+.btn:disabled{opacity:.3;cursor:default}
+.btn.gold{border-color:var(--gold);color:var(--gold);background:rgba(255,215,0,.06)}
+.btn.gold:hover{background:rgba(255,215,0,.15);box-shadow:0 0 12px rgba(255,215,0,.3)}
+.btn.danger{border-color:var(--danger);color:var(--danger)}
+.status-chip{font-size:11px;color:var(--gold);border:1px solid rgba(255,215,0,.3);padding:6px 12px;border-radius:20px;background:rgba(255,215,0,.05)}
+.tabs{display:flex;gap:6px;margin:26px 0 20px;overflow-x:auto;padding-bottom:2px}
+.tab{flex:1;min-width:100px;text-align:center;padding:11px 8px;border:1px solid var(--border);border-radius:8px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:rgba(160,240,255,.45);cursor:pointer;background:rgba(255,255,255,.02);white-space:nowrap}
+.tab.on{border-color:var(--cyan);color:var(--cyan);background:rgba(160,240,255,.08);box-shadow:0 0 10px rgba(160,240,255,.15)}
+.section{display:none}.section.on{display:block;animation:fadein .25s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;position:relative;transition:transform .15s,box-shadow .15s}
+.card:hover{transform:translateY(-3px)}
+.img-wrap{position:relative;aspect-ratio:1;overflow:hidden;background:rgba(255,255,255,.02)}
+.card img{width:100%;height:100%;object-fit:cover}
+.rarity-badge,.onchain-badge{position:absolute;top:8px;font-size:8px;padding:3px 8px;border-radius:10px;letter-spacing:1px;font-weight:bold;backdrop-filter:blur(4px)}
+.rarity-badge{right:8px;text-transform:uppercase}
+.onchain-badge{left:8px;background:rgba(68,255,136,.15);color:var(--ok);border:1px solid rgba(68,255,136,.4)}
+.card-body{padding:12px 14px}.card-name{font-size:12px;color:var(--cyan);font-weight:bold;margin-bottom:3px}.card-tribe{font-size:9px;color:rgba(160,240,255,.4);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}.card-stats{font-size:9px;color:rgba(224,240,255,.5);line-height:1.6;margin-bottom:10px}.card-stats b{color:var(--gold)}.card-price{font-size:14px;color:var(--gold);font-weight:bold;margin-bottom:8px}.card-desc{font-size:9.5px;color:rgba(160,240,255,.35);margin-bottom:10px;line-height:1.5;font-style:italic}.card .btn{width:100%}.explorer-link{display:block;font-size:9px;color:var(--ok);text-decoration:none;text-align:center;margin-top:6px;letter-spacing:1px}.empty{text-align:center;padding:50px 20px;color:rgba(160,240,255,.25);font-size:12px;letter-spacing:1px}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:rgba(10,10,20,.97);border:1px solid var(--cyan);border-radius:10px;padding:14px 22px;color:var(--cyan);font-size:12px;z-index:999;max-width:90vw;text-align:center;box-shadow:0 0 20px rgba(160,240,255,.2)}.toast.err{border-color:var(--danger);color:var(--danger)}.market-form{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}.seller-tag{font-size:9px;color:rgba(160,240,255,.35);margin-bottom:6px}.section-title{font-size:13px;color:var(--gold);letter-spacing:2px;text-transform:uppercase;margin-bottom:14px}.featured{display:flex;gap:20px;background:var(--card);border:1px solid rgba(255,68,68,.3);border-radius:16px;padding:20px;margin-bottom:26px;box-shadow:0 0 30px rgba(255,68,68,.08);flex-wrap:wrap}.featured img{width:180px;height:180px;border-radius:12px;object-fit:cover;flex-shrink:0}.featured-info{flex:1;min-width:220px}.featured-info h2{color:var(--gold);font-size:18px;margin-bottom:6px;letter-spacing:1px}.featured-info p{font-size:11px;color:rgba(160,240,255,.5);margin-bottom:10px;line-height:1.6}.spinner{border:2px solid rgba(160,240,255,.15);border-top-color:var(--cyan);border-radius:50%;width:26px;height:26px;animation:spin .8s linear infinite;margin:30px auto}@keyframes spin{to{transform:rotate(360deg)}}</style>
 </head>
 <body>
-<!-- Your full HTML body content here -->
+<div class="grid-overlay"></div>
+<div class="wrap">
+  <div class="hero">
+    <h1>MUDD<span>BRO</span> FORGE</h1>
+    <p>On-Chain Gear · TON Testnet · Genesis Collection</p>
+    <div class="identity-bar" id="identityBar"></div>
+  </div>
+  <div class="tabs">
+    <div class="tab on" data-tab="gallery">Gallery</div>
+    <div class="tab" data-tab="market">Market</div>
+    <div class="tab" data-tab="vault">My Vault</div>
+    <div class="tab" data-tab="wallet">Wallet</div>
+  </div>
+  <div class="section on" id="sec-gallery"><div id="featuredWrap"></div><div class="section-title">Genesis Catalog — Mint With MUDD</div><div class="grid" id="catalogGrid"><div class="spinner"></div></div></div>
+  <div class="section" id="sec-market"><div class="section-title">Player Marketplace</div><div class="grid" id="marketGrid"><div class="empty">Connect your Telegram ID above to browse the market.</div></div></div>
+  <div class="section" id="sec-vault"><div class="section-title">My Vault</div><div class="grid" id="vaultGrid"><div class="empty">Connect your Telegram ID above to see your collection.</div></div></div>
+  <div class="section" id="sec-wallet"><div class="section-title">Link TON Wallet</div><div class="market-form"><input id="walletInput" placeholder="UQ... / 0Q... / kQ... address"><button class="btn gold" onclick="linkWallet()">Link Wallet</button></div><p style="font-size:10px;color:rgba(160,240,255,.4);line-height:1.6;">Link your TON wallet so future mints and marketplace purchases send NFTs directly to you instead of staying in the custodial vault. Get testnet TON free from <b style="color:var(--gold)">@test_giver_ton_bot</b> on Telegram.</p></div>
+</div>
+<script>
+const API = window.location.href.split('?')[0];
+let TG_ID = ''; let TG_USERNAME = ''; let MUDD_BALANCE = 0; let ORE_BALANCE = 0; let CATALOG = [];
+const LS_ID = 'muddbro_tid'; const LS_NAME = 'muddbro_uname';
+function toast(msg, err){ const t=document.createElement('div'); t.className='toast'+(err?' err':''); t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(), 3200); }
+async function api(action, payload={}){ payload.action=action; payload.telegram_id=TG_ID; payload.username=TG_USERNAME; const res=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); return res.json(); }
+function renderIdentityBar(){ const bar=document.getElementById('identityBar'); if(TG_ID){ bar.innerHTML='<span class="status-chip">@'+(TG_USERNAME||TG_ID)+' · '+MUDD_BALANCE.toLocaleString()+' MUDD · '+ORE_BALANCE.toLocaleString()+' Ore</span> <button class="btn" onclick="disconnect()">Disconnect</button>'; } else { bar.innerHTML='<input id="idInput" placeholder="Telegram username or ID"><button class="btn gold" onclick="connectManual()">Connect</button>'; } }
+function disconnect(){ TG_ID=''; TG_USERNAME=''; localStorage.removeItem(LS_ID); localStorage.removeItem(LS_NAME); renderIdentityBar(); loadVault(); loadMarket(); }
+async function connectManual(){ const val=document.getElementById('idInput').value.trim(); if(!val) return toast('Enter your Telegram username or numeric ID', true); TG_ID=val.replace('@',''); TG_USERNAME=val.replace('@',''); localStorage.setItem(LS_ID,TG_ID); localStorage.setItem(LS_NAME,TG_USERNAME); await doIdentify(); }
+async function doIdentify(){ const r=await api('identify',{}); if(r.ok){ MUDD_BALANCE=r.mudd_balance||0; ORE_BALANCE=r.mudd_ore_balance||0; if(r.ton_wallet_address) document.getElementById('walletInput').value=r.ton_wallet_address; renderIdentityBar(); loadVault(); loadMarket(); toast('Connected as @'+TG_USERNAME); } else toast(r.error||'Failed to connect', true); }
+async function linkWallet(){ if(!TG_ID) return toast('Connect your Telegram ID first', true); const addr=document.getElementById('walletInput').value.trim(); const r=await api('link_wallet',{wallet_address:addr}); if(r.ok) toast('Wallet linked! Future mints go straight to your address.'); else toast(r.error||'Invalid address', true); }
+const RARITY_COLORS={"Genesis Prime":"#ff4444","Genesis":"#ffd700","Mythic":"#ff4444","Legendary":"#ffd700","Epic":"#aa44ff","Rare":"#4488ff","Uncommon":"#44ff88","Common":"#aaaaaa"};
+function rarityBadge(rarity){ const c=RARITY_COLORS[rarity]||'#aaaaaa'; return '<div class="rarity-badge" style="background:'+c+'22;color:'+c+';border:1px solid '+c+'66">'+rarity+'</div>'; }
+async function loadCatalog(){ const r=await api('get_catalog',{}); if(!r.ok) return; CATALOG=r.catalog||[]; const featured=CATALOG.find(c=>c.is_house); if(featured){ document.getElementById('featuredWrap').innerHTML='<div class="featured"><img src="'+featured.image+'"><div class="featured-info"><h2>⚡ GENESIS MINT — LIVE ON-CHAIN</h2><p>'+featured.desc+'</p><div class="card-stats">Mining <b>+'+featured.mining_bonus+'</b> · Companion <b>+'+featured.companion_bonus+'</b> · Racing <b>+'+featured.racing_bonus+'</b> · Ability: <b>'+featured.ability+'</b></div><a class="explorer-link" style="text-align:left" target="_blank" href="https://testnet.tonscan.org/address/'+featured.nft_address+'">View on TON Explorer →</a></div></div>'; } const grid=document.getElementById('catalogGrid'); const sellable=CATALOG.filter(c=>!c.is_house); grid.innerHTML=sellable.map(c=>'<div class="card"><div class="img-wrap"><img src="'+c.image+'">'+rarityBadge(c.rarity)+'</div><div class="card-body"><div class="card-name">'+c.name+'</div><div class="card-tribe">'+c.tribe+' Tribe</div><div class="card-desc">'+c.desc+'</div><div class="card-stats">Mining <b>+'+c.mining_bonus+'</b> · Companion <b>+'+c.companion_bonus+'</b> · Racing <b>+'+c.racing_bonus+'</b><br>Ability: <b>'+c.ability+'</b></div><div class="card-price">'+c.price_mudd.toLocaleString()+' MUDD</div><button class="btn gold" onclick="mintItem(\\''+c.key+'\\')">Mint NFT</button></div></div>').join(''); }
+async function mintItem(key){ if(!TG_ID) return toast('Connect your Telegram ID first', true); const r=await api('request_mint',{catalog_key:key}); if(r.ok){ toast(r.message||'Mint requested!'); await doIdentify(); } else toast(r.error||'Mint failed', true); }
+async function loadMarket(){ const grid=document.getElementById('marketGrid'); if(!TG_ID){ grid.innerHTML='<div class="empty">Connect your Telegram ID above to browse the market.</div>'; return; } const r=await api('browse_market',{}); if(!r.ok||!r.listings||r.listings.length===0){ grid.innerHTML='<div class="empty">No active listings yet. Be the first to list gear from your Vault!</div>'; return; } grid.innerHTML=r.listings.map(l=>{ const mine=String(l.seller_telegram_id)===TG_ID; return '<div class="card"><div class="img-wrap"><img src="'+(l.nft_image_url||'')+'">'+rarityBadge(l.rarity)+(l.nft_address?'<div class="onchain-badge">ON-CHAIN</div>':'')+'</div><div class="card-body"><div class="card-name">'+l.nft_name+'</div><div class="seller-tag">seller: @'+(l.seller_username||l.seller_telegram_id)+'</div><div class="card-stats">Mining <b>+'+l.mining_bonus+'</b> · Companion <b>+'+l.companion_bonus+'</b> · Racing <b>+'+l.racing_bonus+'</b></div><div class="card-price">'+(l.price_mudd||0).toLocaleString()+' MUDD</div><div style="font-size:8px;color:rgba(160,240,255,.3);margin-bottom:6px">5% platform fee included</div>'+(mine?'<button class="btn danger" onclick="cancelListing(\\''+l.id+'\\')">Cancel Listing</button>':'<button class="btn gold" onclick="buyListing(\\''+l.id+'\\')">Buy Now</button>')+'</div></div>'; }).join(''); }
+async function buyListing(id){ if(!TG_ID) return toast('Connect your Telegram ID first', true); const r=await api('buy_listing',{listing_id:id}); if(r.ok){ toast('Purchased!'); await doIdentify(); loadMarket(); loadVault(); } else toast(r.error||'Purchase failed', true); }
+async function cancelListing(id){ const r=await api('cancel_listing',{listing_id:id}); if(r.ok){ toast('Listing cancelled'); loadMarket(); loadVault(); } else toast(r.error||'Cancel failed', true); }
+async function loadVault(){ const grid=document.getElementById('vaultGrid'); if(!TG_ID){ grid.innerHTML='<div class="empty">Connect your Telegram ID above to see your collection.</div>'; return; } const r=await api('my_collection',{}); if(!r.ok||!r.gear||r.gear.length===0){ grid.innerHTML='<div class="empty">Your vault is empty. Mint something from the Gallery!</div>'; return; } grid.innerHTML=r.gear.map(g=>{ const statusTag=g.mint_tx_status==='requested'?'<div class="onchain-badge" style="background:rgba(255,215,0,.15);color:var(--gold);border-color:rgba(255,215,0,.4)">FORGING...</div>':(g.minted_onchain?'<div class="onchain-badge">ON-CHAIN</div>':''); return '<div class="card"><div class="img-wrap"><img src="'+(g.image_url||'')+'">'+rarityBadge(g.rarity)+statusTag+'</div><div class="card-body"><div class="card-name">'+g.name+'</div><div class="card-tribe">'+g.tribe+' Tribe</div><div class="card-stats">Mining <b>+'+g.mining_bonus+'</b> · Companion <b>+'+g.companion_bonus+'</b> · Racing <b>+'+g.racing_bonus+'</b></div>'+(g.nft_address?'<a class="explorer-link" target="_blank" href="https://testnet.tonscan.org/address/'+g.nft_address+'">View on Explorer →</a>':'')+(g.listed_for_sale?'<button class="btn" disabled>Listed For Sale</button>':'<button class="btn" onclick="promptList(\\''+g.id+'\\')">List For Sale</button>')+'</div></div>'; }).join(''); }
+async function promptList(gearId){ const price=prompt('List price in MUDD (5% platform fee applies — you receive 95%):'); if(!price||isNaN(Number(price))) return; const r=await api('list_gear',{gear_id:gearId,price_mudd:Number(price)}); if(r.ok){ toast('Listed on the market!'); loadVault(); loadMarket(); } else toast(r.error||'Listing failed', true); }
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{ document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on')); document.querySelectorAll('.section').forEach(x=>x.classList.remove('on')); t.classList.add('on'); document.getElementById('sec-'+t.dataset.tab).classList.add('on'); if(t.dataset.tab==='market') loadMarket(); if(t.dataset.tab==='vault') loadVault(); }));
+(function init(){ try{ const tg=window.Telegram&&window.Telegram.WebApp; if(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user){ tg.ready(); TG_ID=String(tg.initDataUnsafe.user.id); TG_USERNAME=tg.initDataUnsafe.user.username||tg.initDataUnsafe.user.first_name||TG_ID; } } catch(e){} if(!TG_ID){ TG_ID=localStorage.getItem(LS_ID)||''; TG_USERNAME=localStorage.getItem(LS_NAME)||''; } renderIdentityBar(); loadCatalog(); if(TG_ID) doIdentify(); })();
+</script>
 </body>
-</html>`;
+</html>
