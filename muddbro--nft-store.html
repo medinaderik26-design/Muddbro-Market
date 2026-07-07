@@ -1,88 +1,1287 @@
-<!DOCTYPE html>
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
+
+// ─── Genesis Catalog ────────────────────────────────────────────────────────
+const CATALOG = [
+  { 
+    key: "sun-forged-molten-crown", 
+    name: "Sun-Forged Molten Crown", 
+    index: 1, 
+    image: "https://media.base44.com/images/public/6a4020251d35ee93ec909dfa/d38196aa1_image.jpg", 
+    tribe: "Sun-Forged", 
+    rarity: "Genesis Prime", 
+    mining_bonus: 70, 
+    companion_bonus: 25, 
+    racing_bonus: 12, 
+    durability: 100, 
+    ability: "Eternal Flame", 
+    desc: "A crown of living lava that has never cooled since the world's first forging.",
+    price_mudd: 5000, 
+    minted_onchain: true, 
+    nft_address: "0QCGwqBbWLOEst04RpjaFD2C3G1QS2uWXkxFJ7xDFwLwYrq8", 
+    is_house: true 
+  }
+];
+
+const COLLECTION_ADDRESS = "kQAid8tfDNbNLLHWDInRbhGK_Rfv_ouRtL7ocitfMv07KJ2b";
+const G0_WALLET = "0QAG3lJZz24VOz6eicLTqP5M-YtfKJ96Naq3FPUz548Pcsw8";
+const MARKET_FEE_BPS = 500;
+const HOUSE_TELEGRAM_ID = "muddbro_house";
+
+// ─── In-Memory Storage (in production, use Deno KV or database) ───────────
+const listings = new Map();
+const wallets = new Map();
+const user_inventory = new Map();
+const transactions = [];
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Content-Type": "application/json"
+};
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  if (req.method === "POST") {
+    try {
+      const body = await req.json();
+      const base44 = createClientFromRequest(req);
+      const action = body.action || "";
+
+      // ═══════════════════════════════════════════════════════════════
+      // ✅ IDENTIFY - Get user info & catalog
+      // ═══════════════════════════════════════════════════════════════
+      if (action === "identify") {
+        const telegram_id = body.telegram_id || "anonymous";
+        const user_wallet = wallets.get(telegram_id) || null;
+        const inventory = user_inventory.get(telegram_id) || [];
+        
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          telegram_id,
+          user_wallet,
+          inventory_count: inventory.length,
+          catalog: CATALOG,
+          message: "Identified successfully"
+        }), { headers: corsHeaders });
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ✅ LINK_WALLET - Connect Telegram to blockchain wallet
+      // ═══════════════════════════════════════════════════════════════
+      if (action === "link_wallet") {
+        const telegram_id = body.telegram_id;
+        const wallet_address = body.wallet_address;
+        
+        if (!telegram_id || !wallet_address) {
+          return new Response(JSON.stringify({ 
+            ok: false, 
+            error: "Missing telegram_id or wallet_address" 
+          }), { status: 400, headers: corsHeaders });
+        }
+
+        wallets.set(telegram_id, wallet_address);
+        console.log(`[LINK_WALLET] ${telegram_id} -> ${wallet_address}`);
+
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          message: "Wallet linked successfully",
+          wallet: wallet_address,
+          telegram_id
+        }), { headers: corsHeaders });
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ✅ REQUEST_MINT - User requests to mint an NFT
+      // ═══════════════════════════════════════════════════════════════
+      if (action === "request_mint") {
+        const telegram_id = body.telegram_id;
+        const nft_key = body.nft_key;
+        const quantity = body.quantity || 1;
+
+        if (!telegram_id || !nft_key) {
+          return new Response(JSON.stringify({ 
+            ok: false, 
+            error: "Missing telegram_id or nft_key" 
+          }), { status: 400, headers: corsHeaders });
+        }
+
+        const nft = CATALOG.find(c => c.key === nft_key);
+        if (!nft) {
+          return new Response(JSON.stringify({ 
+            ok: false, 
+            error: "NFT not found" 
+          }), { status: 404, headers: corsHeaders });
+        }
+
+        const total_cost = nft.price_mudd * quantity;
+        const tx_id = `mint_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        // Add to user inventory
+        const inv = user_inventory.get(telegram_id) || [];
+        for (let i = 0; i < quantity; i++) {
+          inv.push({ ...nft, tx_id, acquired: new Date().toISOString() });
+        }
+        user_inventory.set(telegram_id, inv);
+
+        transactions.push({
+          tx_id,
+          type: "mint_request",
+          telegram_id,
+          nft_key,
+          quantity,
+          total_cost,
+          timestamp: new Date().toISOString(),
+          status: "completed"
+        });
+
+        console.log(`[REQUEST_MINT] ${telegram_id} minted ${quantity}x ${nft_key}`);
+
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          message: "Mint successful",
+          tx_id,
+          nft,
+          total_cost,
+          quantity,
+          new_inventory_count: user_inventory.get(telegram_id).length
+        }), { headers: corsHeaders });
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ✅ LIST_GEAR - User lists an NFT for sale
+      // ═══════════════════════════════════════════════════════════════
+      if (action === "list_gear") {
+        const telegram_id = body.telegram_id;
+        const nft_key = body.nft_key;
+        const price = body.price;
+
+        if (!telegram_id || !nft_key || !price) {
+          return new Response(JSON.stringify({ 
+            ok: false, 
+            error: "Missing telegram_id, nft_key, or price" 
+          }), { status: 400, headers: corsHeaders });
+        }
+
+        if (price <= 0) {
+          return new Response(JSON.stringify({ 
+            ok: false, 
+            error: "Price must be greater than 0" 
+          }), { status: 400, headers: corsHeaders });
+        }
+
+        const nft = CATALOG.find(c => c.key === nft_key);
+        if (!nft) {
+          return new Response(JSON.stringify({ 
+            ok: false, 
+            error: "NFT not found in catalog" 
+          }), { status: 404, headers: corsHeaders });
+        }
+
+        const listing_id = `list_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        listings.set(listing_id, {
+          nft_key,
+          seller: telegram_id,
+          price,
+          timestamp: new Date().toISOString()
+        });
+
+        console.log(`[LIST_GEAR] ${telegram_id} listed ${nft_key} for ${price} MUDD`);
+
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          message: "NFT listed for sale",
+          listing_id,
+          nft,
+          listing_price: price,
+          seller: telegram_id
+        }), { headers: corsHeaders });
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ✅ BUY_LISTING - User purchases a listed NFT
+      // ═══════════════════════════════════════════════════════════════
+      if (action === "buy_listing") {
+        const telegram_id = body.telegram_id;
+        const listing_id = body.listing_id;
+
+        if (!telegram_id || !listing_id) {
+          return new Response(JSON.stringify({ 
+            ok: false, 
+            error: "Missing telegram_id or listing_id" 
+          }), { status: 400, headers: corsHeaders });
+        }
+
+        const listing = listings.get(listing_id);
+        if (!listing) {
+          return new Response(JSON.stringify({ 
+            ok: false, 
+            error: "Listing not found" 
+          }), { status: 404, headers: corsHeaders });
+        }
+
+        const nft = CATALOG.find(c => c.key === listing.nft_key);
+        const market_fee = Math.floor(listing.price * (MARKET_FEE_BPS / 10000));
+        const seller_earnings = listing.price - market_fee;
+
+        const tx_id = `buy_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        // Add to buyer inventory
+        const buyer_inv = user_inventory.get(telegram_id) || [];
+        buyer_inv.push({ ...nft, tx_id, acquired: new Date().toISOString() });
+        user_inventory.set(telegram_id, buyer_inv);
+
+        transactions.push({
+          tx_id,
+          type: "purchase",
+          buyer: telegram_id,
+          seller: listing.seller,
+          nft_key: listing.nft_key,
+          price: listing.price,
+          market_fee,
+          seller_earnings,
+          timestamp: new Date().toISOString(),
+          status: "completed"
+        });
+
+        listings.delete(listing_id);
+        console.log(`[BUY_LISTING] ${telegram_id} bought from ${listing.seller} for ${listing.price} MUDD`);
+
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          message: "Purchase successful",
+          tx_id,
+          nft,
+          buyer: telegram_id,
+          seller: listing.seller,
+          price: listing.price,
+          market_fee,
+          seller_earnings
+        }), { headers: corsHeaders });
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ✅ CANCEL_LISTING - Remove an NFT from sale
+      // ═══════════════════════════════════════════════════════════════
+      if (action === "cancel_listing") {
+        const telegram_id = body.telegram_id;
+        const listing_id = body.listing_id;
+
+        if (!telegram_id || !listing_id) {
+          return new Response(JSON.stringify({ 
+            ok: false, 
+            error: "Missing telegram_id or listing_id" 
+          }), { status: 400, headers: corsHeaders });
+        }
+
+        const listing = listings.get(listing_id);
+        if (!listing) {
+          return new Response(JSON.stringify({ 
+            ok: false, 
+            error: "Listing not found" 
+          }), { status: 404, headers: corsHeaders });
+        }
+
+        if (listing.seller !== telegram_id) {
+          return new Response(JSON.stringify({ 
+            ok: false, 
+            error: "Only the seller can cancel this listing" 
+          }), { status: 403, headers: corsHeaders });
+        }
+
+        listings.delete(listing_id);
+        console.log(`[CANCEL_LISTING] ${telegram_id} cancelled ${listing_id}`);
+
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          message: "Listing cancelled",
+          listing_id
+        }), { headers: corsHeaders });
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ✅ GET_LISTINGS - Fetch all active marketplace listings
+      // ═══════════════════════════════════════════════════════════════
+      if (action === "get_listings") {
+        const active_listings = Array.from(listings.entries()).map(([id, data]) => {
+          const nft = CATALOG.find(c => c.key === data.nft_key);
+          return {
+            listing_id: id,
+            nft_key: data.nft_key,
+            nft_name: nft?.name || "Unknown",
+            nft_image: nft?.image || "",
+            seller: data.seller,
+            listing_price: data.price,
+            timestamp: data.timestamp
+          };
+        });
+
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          listings: active_listings,
+          count: active_listings.length
+        }), { headers: corsHeaders });
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ✅ GET_TRANSACTIONS - User's transaction history
+      // ═══════════════════════════════════════════════════════════════
+      if (action === "get_transactions") {
+        const telegram_id = body.telegram_id;
+        const user_transactions = transactions.filter(tx => 
+          tx.telegram_id === telegram_id || tx.buyer === telegram_id || tx.seller === telegram_id
+        );
+
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          transactions: user_transactions.sort((a, b) => 
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+          ),
+          count: user_transactions.length
+        }), { headers: corsHeaders });
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ✅ GET_USER_INVENTORY - NFTs owned by user
+      // ═══════════════════════════════════════════════════════════════
+      if (action === "get_user_inventory") {
+        const telegram_id = body.telegram_id;
+        const inventory = user_inventory.get(telegram_id) || [];
+
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          inventory,
+          count: inventory.length
+        }), { headers: corsHeaders });
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ✅ GET_USER_LISTINGS - NFTs user has listed
+      // ═══════════════════════════════════════════════════════════════
+      if (action === "get_user_listings") {
+        const telegram_id = body.telegram_id;
+        const user_listings = Array.from(listings.entries())
+          .filter(([, data]) => data.seller === telegram_id)
+          .map(([id, data]) => {
+            const nft = CATALOG.find(c => c.key === data.nft_key);
+            return {
+              listing_id: id,
+              nft_key: data.nft_key,
+              nft_name: nft?.name || "Unknown",
+              nft_image: nft?.image || "",
+              price: data.price,
+              timestamp: data.timestamp
+            };
+          });
+
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          listings: user_listings,
+          count: user_listings.length
+        }), { headers: corsHeaders });
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ✅ GET_STATS - Global marketplace statistics
+      // ═══════════════════════════════════════════════════════════════
+      if (action === "get_stats") {
+        const completed_sales = transactions.filter(tx => tx.type === "purchase" && tx.status === "completed");
+        const total_volume = completed_sales.reduce((sum, tx) => sum + tx.price, 0);
+        const total_fees = completed_sales.reduce((sum, tx) => sum + (tx.market_fee || 0), 0);
+
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          stats: {
+            total_nfts_catalog: CATALOG.length,
+            active_listings: listings.size,
+            completed_sales: completed_sales.length,
+            total_volume,
+            total_fees_collected: total_fees,
+            total_seller_earnings: total_volume - total_fees,
+            unique_sellers: new Set(completed_sales.map(tx => tx.seller)).size,
+            unique_buyers: new Set(completed_sales.map(tx => tx.buyer)).size,
+            active_users: new Set([...wallets.keys(), ...user_inventory.keys()]).size
+          }
+        }), { headers: corsHeaders });
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ✅ GET_CATALOG - Get full catalog with metadata
+      // ═══════════════════════════════════════════════════════════════
+      if (action === "get_catalog") {
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          catalog: CATALOG,
+          collection_address: COLLECTION_ADDRESS,
+          count: CATALOG.length
+        }), { headers: corsHeaders });
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ✅ GET_LEADERBOARD - Top traders and buyers
+      // ═══════════════════════════════════════════════════════════════
+      if (action === "get_leaderboard") {
+        const buyer_stats = new Map();
+        const seller_stats = new Map();
+
+        transactions.forEach(tx => {
+          if (tx.type === "purchase") {
+            buyer_stats.set(tx.buyer, (buyer_stats.get(tx.buyer) || 0) + tx.price);
+            seller_stats.set(tx.seller, (seller_stats.get(tx.seller) || 0) + tx.seller_earnings);
+          }
+        });
+
+        const top_buyers = Array.from(buyer_stats.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([user, spent]) => ({ user, spent }));
+
+        const top_sellers = Array.from(seller_stats.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([user, earned]) => ({ user, earned }));
+
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          top_buyers,
+          top_sellers
+        }), { headers: corsHeaders });
+      }
+
+      return new Response(JSON.stringify({ ok: false, error: "unknown action" }), { status: 400, headers: corsHeaders });
+    } catch (e) {
+      console.error("muddbroNftStore API error:", e);
+      return new Response(JSON.stringify({ ok: false, error: String(e) }), { status: 500, headers: corsHeaders });
+    }
+  }
+
+  // Serve the enhanced store page
+  return new Response(STORE_HTML, { 
+    headers: { "Content-Type": "text/html; charset=utf-8" } 
+  });
+});
+
+// ─── Enhanced Frontend HTML ───────────────────────────────────────────────
+const STORE_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MUDDBRO // NFT FORGE</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<style>
-*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-:root{--cyan:#a0f0ff;--gold:#ffd700;--dark:#05050a;--dark2:#0a0a1a;--text:#e0f0ff;--border:#2a3550;--card:rgba(12,15,28,.9);--danger:#ff4444;--ok:#44ff88}
-html,body{width:100%;min-height:100vh;background:var(--dark);color:var(--text);font-family:'Courier New',monospace;overflow-x:hidden}
-body{background-image:radial-gradient(circle at 20% 10%,rgba(160,240,255,.06) 0%,transparent 45%),radial-gradient(circle at 80% 90%,rgba(255,215,0,.05) 0%,transparent 45%),linear-gradient(180deg,var(--dark),var(--dark2));min-height:100vh}
-.grid-overlay{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.15;background-image:linear-gradient(rgba(160,240,255,.5) 1px,transparent 1px),linear-gradient(90deg,rgba(160,240,255,.5) 1px,transparent 1px);background-size:40px 40px;mask-image:radial-gradient(circle at 50% 0%,black 0%,transparent 70%)}
-.wrap{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:0 16px 60px}
-.hero{padding:36px 0 20px;text-align:center}
-.hero h1{font-size:clamp(28px,6vw,46px);letter-spacing:6px;color:var(--cyan);text-shadow:0 0 20px rgba(160,240,255,.5);text-transform:uppercase}
-.hero h1 span{color:var(--gold);text-shadow:0 0 20px rgba(255,215,0,.5)}
-.hero p{margin-top:8px;color:rgba(160,240,255,.5);font-size:12px;letter-spacing:2px;text-transform:uppercase}
-.identity-bar{display:flex;gap:8px;justify-content:center;align-items:center;margin-top:18px;flex-wrap:wrap}
-.identity-bar input,.market-form input{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:6px;padding:9px 12px;color:var(--text);font-family:'Courier New',monospace;font-size:12px}
-.identity-bar input{width:180px}.market-form input{width:220px}
-.identity-bar input:focus,.market-form input:focus{outline:none;border-color:var(--cyan)}
-.btn{border:1px solid var(--cyan);background:rgba(160,240,255,.06);color:var(--cyan);padding:9px 18px;border-radius:6px;font-family:'Courier New',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all .15s}
-.btn:hover{background:rgba(160,240,255,.15);box-shadow:0 0 12px rgba(160,240,255,.3)}
-.btn:disabled{opacity:.3;cursor:default}
-.btn.gold{border-color:var(--gold);color:var(--gold);background:rgba(255,215,0,.06)}
-.btn.gold:hover{background:rgba(255,215,0,.15);box-shadow:0 0 12px rgba(255,215,0,.3)}
-.btn.danger{border-color:var(--danger);color:var(--danger)}
-.status-chip{font-size:11px;color:var(--gold);border:1px solid rgba(255,215,0,.3);padding:6px 12px;border-radius:20px;background:rgba(255,215,0,.05)}
-.tabs{display:flex;gap:6px;margin:26px 0 20px;overflow-x:auto;padding-bottom:2px}
-.tab{flex:1;min-width:100px;text-align:center;padding:11px 8px;border:1px solid var(--border);border-radius:8px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:rgba(160,240,255,.45);cursor:pointer;background:rgba(255,255,255,.02);white-space:nowrap}
-.tab.on{border-color:var(--cyan);color:var(--cyan);background:rgba(160,240,255,.08);box-shadow:0 0 10px rgba(160,240,255,.15)}
-.section{display:none}.section.on{display:block;animation:fadein .25s ease}
-@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;position:relative;transition:transform .15s,box-shadow .15s}
-.card:hover{transform:translateY(-3px)}
-.img-wrap{position:relative;aspect-ratio:1;overflow:hidden;background:rgba(255,255,255,.02)}
-.card img{width:100%;height:100%;object-fit:cover}
-.rarity-badge,.onchain-badge{position:absolute;top:8px;font-size:8px;padding:3px 8px;border-radius:10px;letter-spacing:1px;font-weight:bold;backdrop-filter:blur(4px)}
-.rarity-badge{right:8px;text-transform:uppercase}
-.onchain-badge{left:8px;background:rgba(68,255,136,.15);color:var(--ok);border:1px solid rgba(68,255,136,.4)}
-.card-body{padding:12px 14px}.card-name{font-size:12px;color:var(--cyan);font-weight:bold;margin-bottom:3px}.card-tribe{font-size:9px;color:rgba(160,240,255,.4);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}.card-stats{font-size:9px;color:rgba(224,240,255,.5);line-height:1.6;margin-bottom:10px}.card-stats b{color:var(--gold)}.card-price{font-size:14px;color:var(--gold);font-weight:bold;margin-bottom:8px}.card-desc{font-size:9.5px;color:rgba(160,240,255,.35);margin-bottom:10px;line-height:1.5;font-style:italic}.card .btn{width:100%}.explorer-link{display:block;font-size:9px;color:var(--ok);text-decoration:none;text-align:center;margin-top:6px;letter-spacing:1px}.empty{text-align:center;padding:50px 20px;color:rgba(160,240,255,.25);font-size:12px;letter-spacing:1px}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:rgba(10,10,20,.97);border:1px solid var(--cyan);border-radius:10px;padding:14px 22px;color:var(--cyan);font-size:12px;z-index:999;max-width:90vw;text-align:center;box-shadow:0 0 20px rgba(160,240,255,.2)}.toast.err{border-color:var(--danger);color:var(--danger)}.market-form{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}.seller-tag{font-size:9px;color:rgba(160,240,255,.35);margin-bottom:6px}.section-title{font-size:13px;color:var(--gold);letter-spacing:2px;text-transform:uppercase;margin-bottom:14px}.featured{display:flex;gap:20px;background:var(--card);border:1px solid rgba(255,68,68,.3);border-radius:16px;padding:20px;margin-bottom:26px;box-shadow:0 0 30px rgba(255,68,68,.08);flex-wrap:wrap}.featured img{width:180px;height:180px;border-radius:12px;object-fit:cover;flex-shrink:0}.featured-info{flex:1;min-width:220px}.featured-info h2{color:var(--gold);font-size:18px;margin-bottom:6px;letter-spacing:1px}.featured-info p{font-size:11px;color:rgba(160,240,255,.5);margin-bottom:10px;line-height:1.6}.spinner{border:2px solid rgba(160,240,255,.15);border-top-color:var(--cyan);border-radius:50%;width:26px;height:26px;animation:spin .8s linear infinite;margin:30px auto}@keyframes spin{to{transform:rotate(360deg)}}</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MUDDBRO // NFT FORGE</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --cyan: #00ffff;
+      --gold: #ffdd00;
+      --magenta: #ff00ff;
+      --dark: #0a0a1f;
+      --darker: #050508;
+      --text: #e0f0ff;
+      --border: #00ffff;
+      --card: rgba(15, 15, 40, 0.9);
+    }
+    
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: var(--dark);
+      color: var(--text);
+      font-family: 'Courier New', monospace;
+      overflow-x: hidden;
+    }
+    
+    body {
+      background: linear-gradient(135deg, #0a0a1f 0%, #1a0f3f 50%, #0d0d2f 100%);
+    }
+    
+    header {
+      background: rgba(10, 10, 31, 0.98);
+      border-bottom: 3px solid var(--cyan);
+      padding: 25px;
+      text-align: center;
+      box-shadow: 0 0 30px rgba(0, 255, 255, 0.2);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    
+    h1 {
+      font-size: 2.5em;
+      color: var(--cyan);
+      text-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+      margin-bottom: 5px;
+      letter-spacing: 2px;
+    }
+    
+    .tagline {
+      color: var(--magenta);
+      font-size: 1em;
+      text-shadow: 0 0 10px rgba(255, 0, 255, 0.3);
+      letter-spacing: 1px;
+    }
+    
+    .container {
+      max-width: 1300px;
+      margin: 30px auto;
+      padding: 0 20px 60px;
+    }
+    
+    .user-section {
+      background: rgba(20, 20, 60, 0.7);
+      border: 2px solid var(--magenta);
+      padding: 20px;
+      margin-bottom: 30px;
+      border-radius: 8px;
+      box-shadow: 0 0 20px rgba(255, 0, 255, 0.1);
+    }
+    
+    .user-info {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 15px;
+      margin-bottom: 15px;
+    }
+    
+    .user-label { color: var(--cyan); font-weight: bold; text-transform: uppercase; }
+    .user-value { color: var(--gold); font-size: 1.1em; }
+    
+    .action-buttons {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    
+    button {
+      background: linear-gradient(135deg, var(--cyan) 0%, #00aa99 100%);
+      border: none;
+      color: #000;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: all 0.3s ease;
+      font-family: 'Courier New', monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-size: 0.9em;
+    }
+    
+    button:hover {
+      background: linear-gradient(135deg, var(--cyan) 0%, #00ff88 100%);
+      box-shadow: 0 0 15px rgba(0, 255, 255, 0.5);
+      transform: translateY(-2px);
+    }
+    
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 30px;
+    }
+    
+    .stat-card {
+      background: var(--card);
+      border: 2px solid var(--cyan);
+      padding: 15px;
+      border-radius: 8px;
+      text-align: center;
+      box-shadow: 0 0 15px rgba(0, 255, 255, 0.1);
+    }
+    
+    .stat-label { color: var(--cyan); font-size: 0.85em; text-transform: uppercase; margin-bottom: 8px; }
+    .stat-value { color: var(--gold); font-size: 2em; font-weight: bold; text-shadow: 0 0 10px rgba(255, 221, 0, 0.3); }
+    
+    nav {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 10px;
+      overflow-x: auto;
+    }
+    
+    nav button {
+      background: rgba(0, 255, 255, 0.15);
+      border: 2px solid var(--cyan);
+      color: var(--cyan);
+      flex: 1;
+      min-width: 120px;
+      padding: 12px;
+    }
+    
+    nav button.active {
+      background: linear-gradient(135deg, var(--cyan) 0%, #00aa99 100%);
+      color: #000;
+    }
+    
+    .tab-content { display: none; }
+    .tab-content.active { display: block; animation: fadeIn 0.3s ease; }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .section-title {
+      color: var(--cyan);
+      font-size: 1.3em;
+      margin-bottom: 20px;
+      text-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
+    }
+    
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    
+    .nft-card {
+      background: var(--card);
+      border: 2px solid var(--cyan);
+      border-radius: 10px;
+      overflow: hidden;
+      transition: all 0.3s ease;
+      cursor: pointer;
+      box-shadow: 0 0 15px rgba(0, 255, 255, 0.1);
+      position: relative;
+    }
+    
+    .nft-card:hover {
+      transform: translateY(-8px);
+      box-shadow: 0 10px 30px rgba(0, 255, 255, 0.3);
+      border-color: var(--magenta);
+    }
+    
+    .nft-image {
+      width: 100%;
+      height: 250px;
+      object-fit: cover;
+      background: #000;
+    }
+    
+    .nft-badge {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: var(--magenta);
+      color: #fff;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.75em;
+      font-weight: bold;
+    }
+    
+    .nft-info {
+      padding: 15px;
+      background: rgba(10, 10, 31, 0.9);
+      min-height: 200px;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .nft-name { color: var(--cyan); font-weight: bold; margin-bottom: 5px; }
+    .nft-tribe { color: var(--magenta); font-size: 0.9em; margin-bottom: 8px; }
+    .nft-desc { color: #a0c0ff; font-size: 0.9em; margin-bottom: 10px; flex-grow: 1; }
+    
+    .nft-price {
+      color: var(--gold);
+      font-weight: bold;
+      font-size: 1.2em;
+      margin: 10px 0;
+    }
+    
+    .nft-actions {
+      display: flex;
+      gap: 8px;
+    }
+    
+    .nft-btn {
+      flex: 1;
+      padding: 10px;
+      font-size: 0.85em;
+    }
+    
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #a0c0ff;
+    }
+    
+    .empty-state h2 { color: var(--cyan); margin-bottom: 10px; }
+    
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.85);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(5px);
+    }
+    
+    .modal.active { display: flex; }
+    
+    .modal-content {
+      background: linear-gradient(135deg, #1a0f3f 0%, #0a0a1f 100%);
+      border: 3px solid var(--cyan);
+      border-radius: 12px;
+      padding: 30px;
+      max-width: 500px;
+      width: 90%;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 0 40px rgba(0, 255, 255, 0.4);
+    }
+    
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 2px solid var(--cyan);
+    }
+    
+    .modal-title { font-size: 1.6em; color: var(--cyan); }
+    .modal-close { background: none; border: none; color: var(--magenta); font-size: 1.8em; cursor: pointer; }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    .form-label {
+      display: block;
+      color: var(--cyan);
+      margin-bottom: 8px;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+    
+    .form-input {
+      width: 100%;
+      padding: 12px;
+      background: rgba(0, 0, 0, 0.5);
+      border: 2px solid var(--cyan);
+      color: var(--text);
+      border-radius: 5px;
+      font-family: 'Courier New', monospace;
+    }
+    
+    .form-input:focus { outline: none; border-color: var(--magenta); }
+    
+    .leaderboard-item {
+      background: rgba(20, 20, 60, 0.6);
+      border-left: 4px solid var(--gold);
+      padding: 12px;
+      margin-bottom: 10px;
+      border-radius: 5px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .leaderboard-name { color: var(--cyan); font-weight: bold; }
+    .leaderboard-value { color: var(--gold); font-weight: bold; }
+    
+    @media (max-width: 768px) {
+      h1 { font-size: 1.8em; }
+      .grid { grid-template-columns: 1fr; }
+      nav { flex-direction: column; }
+      nav button { width: 100%; }
+      .user-info { flex-direction: column; }
+    }
+  </style>
 </head>
 <body>
-<div class="grid-overlay"></div>
-<div class="wrap">
-  <div class="hero">
-    <h1>MUDD<span>BRO</span> FORGE</h1>
-    <p>On-Chain Gear · TON Testnet · Genesis Collection</p>
-    <div class="identity-bar" id="identityBar"></div>
+  <header>
+    <h1>⚒️ MUDDBRO NFT FORGE ⚒️</h1>
+    <p class="tagline">CRAFT • TRADE • CONQUER</p>
+  </header>
+
+  <div class="container">
+    <!-- User Section -->
+    <div class="user-section">
+      <div class="user-info">
+        <div>
+          <div class="user-label">TELEGRAM USER</div>
+          <div id="userIdDisplay" class="user-value">Loading...</div>
+        </div>
+        <div>
+          <div class="user-label">WALLET</div>
+          <div id="walletDisplay" class="user-value">Not connected</div>
+        </div>
+        <div>
+          <div class="user-label">INVENTORY</div>
+          <div id="inventoryCount" class="user-value">0 NFTs</div>
+        </div>
+      </div>
+      
+      <div class="action-buttons">
+        <button onclick="connectWallet()">🔗 CONNECT WALLET</button>
+        <button onclick="refreshUI()">🔄 REFRESH</button>
+        <button onclick="toggleLeaderboard()">📊 LEADERBOARD</button>
+      </div>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="stats-bar" id="statsBar">
+      <div class="stat-card">
+        <div class="stat-label">📦 Total NFTs</div>
+        <div class="stat-value" id="totalNfts">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">🏪 Active Listings</div>
+        <div class="stat-value" id="activeListings">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">💎 Volume</div>
+        <div class="stat-value" id="salesVolume">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">⚡ Sales</div>
+        <div class="stat-value" id="completedSales">0</div>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav>
+      <button class="nav-tab active" data-tab="catalog">📦 CATALOG</button>
+      <button class="nav-tab" data-tab="marketplace">🏪 MARKETPLACE</button>
+      <button class="nav-tab" data-tab="inventory">🎒 MY INVENTORY</button>
+      <button class="nav-tab" data-tab="listings">📤 MY LISTINGS</button>
+      <button class="nav-tab" data-tab="activity">📊 ACTIVITY</button>
+    </nav>
+
+    <!-- Tabs -->
+    <div id="catalog-tab" class="tab-content active">
+      <div class="section-title">Genesis Collection</div>
+      <div class="grid" id="catalogGrid"></div>
+    </div>
+
+    <div id="marketplace-tab" class="tab-content">
+      <div class="section-title">Active Listings</div>
+      <div class="grid" id="marketplaceGrid"></div>
+    </div>
+
+    <div id="inventory-tab" class="tab-content">
+      <div class="section-title">Your NFTs</div>
+      <div class="grid" id="inventoryGrid"></div>
+    </div>
+
+    <div id="listings-tab" class="tab-content">
+      <div class="section-title">Your Listings</div>
+      <div class="grid" id="listingsGrid"></div>
+    </div>
+
+    <div id="activity-tab" class="tab-content">
+      <div class="section-title">Transaction History</div>
+      <div id="activityGrid"></div>
+    </div>
   </div>
-  <div class="tabs">
-    <div class="tab on" data-tab="gallery">Gallery</div>
-    <div class="tab" data-tab="market">Market</div>
-    <div class="tab" data-tab="vault">My Vault</div>
-    <div class="tab" data-tab="wallet">Wallet</div>
+
+  <!-- Modals -->
+  <div class="modal" id="walletModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">Connect Wallet</div>
+        <button class="modal-close" onclick="closeModal('walletModal')">✕</button>
+      </div>
+      <form onsubmit="handleWalletConnect(event)">
+        <div class="form-group">
+          <label class="form-label">Wallet Address</label>
+          <input type="text" id="walletInput" class="form-input" placeholder="UQ... / 0Q... / kQ..." required>
+        </div>
+        <button type="submit" style="width: 100%;">Connect Wallet</button>
+      </form>
+    </div>
   </div>
-  <div class="section on" id="sec-gallery"><div id="featuredWrap"></div><div class="section-title">Genesis Catalog — Mint With MUDD</div><div class="grid" id="catalogGrid"><div class="spinner"></div></div></div>
-  <div class="section" id="sec-market"><div class="section-title">Player Marketplace</div><div class="grid" id="marketGrid"><div class="empty">Connect your Telegram ID above to browse the market.</div></div></div>
-  <div class="section" id="sec-vault"><div class="section-title">My Vault</div><div class="grid" id="vaultGrid"><div class="empty">Connect your Telegram ID above to see your collection.</div></div></div>
-  <div class="section" id="sec-wallet"><div class="section-title">Link TON Wallet</div><div class="market-form"><input id="walletInput" placeholder="UQ... / 0Q... / kQ... address"><button class="btn gold" onclick="linkWallet()">Link Wallet</button></div><p style="font-size:10px;color:rgba(160,240,255,.4);line-height:1.6;">Link your TON wallet so future mints and marketplace purchases send NFTs directly to you instead of staying in the custodial vault. Get testnet TON free from <b style="color:var(--gold)">@test_giver_ton_bot</b> on Telegram.</p></div>
-</div>
-<script>
-const API = window.location.href.split('?')[0];
-let TG_ID = ''; let TG_USERNAME = ''; let MUDD_BALANCE = 0; let ORE_BALANCE = 0; let CATALOG = [];
-const LS_ID = 'muddbro_tid'; const LS_NAME = 'muddbro_uname';
-function toast(msg, err){ const t=document.createElement('div'); t.className='toast'+(err?' err':''); t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(), 3200); }
-async function api(action, payload={}){ payload.action=action; payload.telegram_id=TG_ID; payload.username=TG_USERNAME; const res=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); return res.json(); }
-function renderIdentityBar(){ const bar=document.getElementById('identityBar'); if(TG_ID){ bar.innerHTML='<span class="status-chip">@'+(TG_USERNAME||TG_ID)+' · '+MUDD_BALANCE.toLocaleString()+' MUDD · '+ORE_BALANCE.toLocaleString()+' Ore</span> <button class="btn" onclick="disconnect()">Disconnect</button>'; } else { bar.innerHTML='<input id="idInput" placeholder="Telegram username or ID"><button class="btn gold" onclick="connectManual()">Connect</button>'; } }
-function disconnect(){ TG_ID=''; TG_USERNAME=''; localStorage.removeItem(LS_ID); localStorage.removeItem(LS_NAME); renderIdentityBar(); loadVault(); loadMarket(); }
-async function connectManual(){ const val=document.getElementById('idInput').value.trim(); if(!val) return toast('Enter your Telegram username or numeric ID', true); TG_ID=val.replace('@',''); TG_USERNAME=val.replace('@',''); localStorage.setItem(LS_ID,TG_ID); localStorage.setItem(LS_NAME,TG_USERNAME); await doIdentify(); }
-async function doIdentify(){ const r=await api('identify',{}); if(r.ok){ MUDD_BALANCE=r.mudd_balance||0; ORE_BALANCE=r.mudd_ore_balance||0; if(r.ton_wallet_address) document.getElementById('walletInput').value=r.ton_wallet_address; renderIdentityBar(); loadVault(); loadMarket(); toast('Connected as @'+TG_USERNAME); } else toast(r.error||'Failed to connect', true); }
-async function linkWallet(){ if(!TG_ID) return toast('Connect your Telegram ID first', true); const addr=document.getElementById('walletInput').value.trim(); const r=await api('link_wallet',{wallet_address:addr}); if(r.ok) toast('Wallet linked! Future mints go straight to your address.'); else toast(r.error||'Invalid address', true); }
-const RARITY_COLORS={"Genesis Prime":"#ff4444","Genesis":"#ffd700","Mythic":"#ff4444","Legendary":"#ffd700","Epic":"#aa44ff","Rare":"#4488ff","Uncommon":"#44ff88","Common":"#aaaaaa"};
-function rarityBadge(rarity){ const c=RARITY_COLORS[rarity]||'#aaaaaa'; return '<div class="rarity-badge" style="background:'+c+'22;color:'+c+';border:1px solid '+c+'66">'+rarity+'</div>'; }
-async function loadCatalog(){ const r=await api('get_catalog',{}); if(!r.ok) return; CATALOG=r.catalog||[]; const featured=CATALOG.find(c=>c.is_house); if(featured){ document.getElementById('featuredWrap').innerHTML='<div class="featured"><img src="'+featured.image+'"><div class="featured-info"><h2>⚡ GENESIS MINT — LIVE ON-CHAIN</h2><p>'+featured.desc+'</p><div class="card-stats">Mining <b>+'+featured.mining_bonus+'</b> · Companion <b>+'+featured.companion_bonus+'</b> · Racing <b>+'+featured.racing_bonus+'</b> · Ability: <b>'+featured.ability+'</b></div><a class="explorer-link" style="text-align:left" target="_blank" href="https://testnet.tonscan.org/address/'+featured.nft_address+'">View on TON Explorer →</a></div></div>'; } const grid=document.getElementById('catalogGrid'); const sellable=CATALOG.filter(c=>!c.is_house); grid.innerHTML=sellable.map(c=>'<div class="card"><div class="img-wrap"><img src="'+c.image+'">'+rarityBadge(c.rarity)+'</div><div class="card-body"><div class="card-name">'+c.name+'</div><div class="card-tribe">'+c.tribe+' Tribe</div><div class="card-desc">'+c.desc+'</div><div class="card-stats">Mining <b>+'+c.mining_bonus+'</b> · Companion <b>+'+c.companion_bonus+'</b> · Racing <b>+'+c.racing_bonus+'</b><br>Ability: <b>'+c.ability+'</b></div><div class="card-price">'+c.price_mudd.toLocaleString()+' MUDD</div><button class="btn gold" onclick="mintItem(\\''+c.key+'\\')">Mint NFT</button></div></div>').join(''); }
-async function mintItem(key){ if(!TG_ID) return toast('Connect your Telegram ID first', true); const r=await api('request_mint',{catalog_key:key}); if(r.ok){ toast(r.message||'Mint requested!'); await doIdentify(); } else toast(r.error||'Mint failed', true); }
-async function loadMarket(){ const grid=document.getElementById('marketGrid'); if(!TG_ID){ grid.innerHTML='<div class="empty">Connect your Telegram ID above to browse the market.</div>'; return; } const r=await api('browse_market',{}); if(!r.ok||!r.listings||r.listings.length===0){ grid.innerHTML='<div class="empty">No active listings yet. Be the first to list gear from your Vault!</div>'; return; } grid.innerHTML=r.listings.map(l=>{ const mine=String(l.seller_telegram_id)===TG_ID; return '<div class="card"><div class="img-wrap"><img src="'+(l.nft_image_url||'')+'">'+rarityBadge(l.rarity)+(l.nft_address?'<div class="onchain-badge">ON-CHAIN</div>':'')+'</div><div class="card-body"><div class="card-name">'+l.nft_name+'</div><div class="seller-tag">seller: @'+(l.seller_username||l.seller_telegram_id)+'</div><div class="card-stats">Mining <b>+'+l.mining_bonus+'</b> · Companion <b>+'+l.companion_bonus+'</b> · Racing <b>+'+l.racing_bonus+'</b></div><div class="card-price">'+(l.price_mudd||0).toLocaleString()+' MUDD</div><div style="font-size:8px;color:rgba(160,240,255,.3);margin-bottom:6px">5% platform fee included</div>'+(mine?'<button class="btn danger" onclick="cancelListing(\\''+l.id+'\\')">Cancel Listing</button>':'<button class="btn gold" onclick="buyListing(\\''+l.id+'\\')">Buy Now</button>')+'</div></div>'; }).join(''); }
-async function buyListing(id){ if(!TG_ID) return toast('Connect your Telegram ID first', true); const r=await api('buy_listing',{listing_id:id}); if(r.ok){ toast('Purchased!'); await doIdentify(); loadMarket(); loadVault(); } else toast(r.error||'Purchase failed', true); }
-async function cancelListing(id){ const r=await api('cancel_listing',{listing_id:id}); if(r.ok){ toast('Listing cancelled'); loadMarket(); loadVault(); } else toast(r.error||'Cancel failed', true); }
-async function loadVault(){ const grid=document.getElementById('vaultGrid'); if(!TG_ID){ grid.innerHTML='<div class="empty">Connect your Telegram ID above to see your collection.</div>'; return; } const r=await api('my_collection',{}); if(!r.ok||!r.gear||r.gear.length===0){ grid.innerHTML='<div class="empty">Your vault is empty. Mint something from the Gallery!</div>'; return; } grid.innerHTML=r.gear.map(g=>{ const statusTag=g.mint_tx_status==='requested'?'<div class="onchain-badge" style="background:rgba(255,215,0,.15);color:var(--gold);border-color:rgba(255,215,0,.4)">FORGING...</div>':(g.minted_onchain?'<div class="onchain-badge">ON-CHAIN</div>':''); return '<div class="card"><div class="img-wrap"><img src="'+(g.image_url||'')+'">'+rarityBadge(g.rarity)+statusTag+'</div><div class="card-body"><div class="card-name">'+g.name+'</div><div class="card-tribe">'+g.tribe+' Tribe</div><div class="card-stats">Mining <b>+'+g.mining_bonus+'</b> · Companion <b>+'+g.companion_bonus+'</b> · Racing <b>+'+g.racing_bonus+'</b></div>'+(g.nft_address?'<a class="explorer-link" target="_blank" href="https://testnet.tonscan.org/address/'+g.nft_address+'">View on Explorer →</a>':'')+(g.listed_for_sale?'<button class="btn" disabled>Listed For Sale</button>':'<button class="btn" onclick="promptList(\\''+g.id+'\\')">List For Sale</button>')+'</div></div>'; }).join(''); }
-async function promptList(gearId){ const price=prompt('List price in MUDD (5% platform fee applies — you receive 95%):'); if(!price||isNaN(Number(price))) return; const r=await api('list_gear',{gear_id:gearId,price_mudd:Number(price)}); if(r.ok){ toast('Listed on the market!'); loadVault(); loadMarket(); } else toast(r.error||'Listing failed', true); }
-document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{ document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on')); document.querySelectorAll('.section').forEach(x=>x.classList.remove('on')); t.classList.add('on'); document.getElementById('sec-'+t.dataset.tab).classList.add('on'); if(t.dataset.tab==='market') loadMarket(); if(t.dataset.tab==='vault') loadVault(); }));
-(function init(){ try{ const tg=window.Telegram&&window.Telegram.WebApp; if(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user){ tg.ready(); TG_ID=String(tg.initDataUnsafe.user.id); TG_USERNAME=tg.initDataUnsafe.user.username||tg.initDataUnsafe.user.first_name||TG_ID; } } catch(e){} if(!TG_ID){ TG_ID=localStorage.getItem(LS_ID)||''; TG_USERNAME=localStorage.getItem(LS_NAME)||''; } renderIdentityBar(); loadCatalog(); if(TG_ID) doIdentify(); })();
-</script>
+
+  <div class="modal" id="mintModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">Mint NFT</div>
+        <button class="modal-close" onclick="closeModal('mintModal')">✕</button>
+      </div>
+      <div id="mintContent"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="buyModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">Purchase NFT</div>
+        <button class="modal-close" onclick="closeModal('buyModal')">✕</button>
+      </div>
+      <div id="buyContent"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="listModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">List for Sale</div>
+        <button class="modal-close" onclick="closeModal('listModal')">✕</button>
+      </div>
+      <div id="listContent"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="leaderboardModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">🏆 Leaderboard</div>
+        <button class="modal-close" onclick="closeModal('leaderboardModal')">✕</button>
+      </div>
+      <div style="margin-bottom: 20px;">
+        <h3 style="color: var(--cyan); margin-bottom: 15px;">💎 Top Buyers</h3>
+        <div id="topBuyers"></div>
+      </div>
+      <div>
+        <h3 style="color: var(--magenta); margin-bottom: 15px;">⚡ Top Sellers</h3>
+        <div id="topSellers"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentUser = { telegram_id: null, wallet: null };
+    let selectedNft = null;
+
+    async function api(action, payload = {}) {
+      payload.action = action;
+      payload.telegram_id = currentUser.telegram_id;
+      
+      try {
+        const res = await fetch(window.location.href, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        return await res.json();
+      } catch (e) {
+        console.error('API error:', e);
+        return { ok: false, error: e.message };
+      }
+    }
+
+    async function initApp() {
+      const tg = window.Telegram?.WebApp;
+      if (tg) {
+        tg.ready();
+        const user = tg.initDataUnsafe?.user;
+        if (user) currentUser.telegram_id = String(user.id);
+      }
+      if (!currentUser.telegram_id) {
+        currentUser.telegram_id = 'test_' + Math.random().toString(36).substr(2, 9);
+      }
+
+      document.getElementById('userIdDisplay').textContent = currentUser.telegram_id;
+      await loadAll();
+      setupNav();
+    }
+
+    async function loadAll() {
+      await loadCatalog();
+      await loadMarketplace();
+      await loadInventory();
+      await loadListings();
+      await loadActivity();
+      await updateStats();
+    }
+
+    async function loadCatalog() {
+      const data = await api('get_catalog');
+      const grid = document.getElementById('catalogGrid');
+      
+      if (data.ok && data.catalog) {
+        grid.innerHTML = data.catalog.map(nft => \`
+          <div class="nft-card">
+            <div style="position: relative;">
+              <img src="\${nft.image}" alt="\${nft.name}" class="nft-image" onerror="this.src='https://via.placeholder.com/280x250?text=NFT'">
+              \${nft.is_house ? '<div class="nft-badge">GENESIS</div>' : ''}
+            </div>
+            <div class="nft-info">
+              <div class="nft-name">\${nft.name}</div>
+              <div class="nft-tribe">\${nft.tribe}</div>
+              <div class="nft-desc">\${nft.desc}</div>
+              <div class="nft-price">\${nft.price_mudd} MUDD</div>
+              <div class="nft-actions">
+                <button class="nft-btn" onclick='openMintModal(\${JSON.stringify(nft)})'>Mint</button>
+              </div>
+            </div>
+          </div>
+        \`).join('');
+      }
+    }
+
+    async function loadMarketplace() {
+      const data = await api('get_listings');
+      const grid = document.getElementById('marketplaceGrid');
+      
+      if (data.ok && data.listings && data.listings.length > 0) {
+        grid.innerHTML = data.listings.map(listing => \`
+          <div class="nft-card">
+            <div style="position: relative;">
+              <img src="\${listing.nft_image}" alt="\${listing.nft_name}" class="nft-image" onerror="this.src='https://via.placeholder.com/280x250?text=NFT'">
+              <div class="nft-badge" style="background: var(--gold); color: #000;">\${listing.listing_price} MUDD</div>
+            </div>
+            <div class="nft-info">
+              <div class="nft-name">\${listing.nft_name}</div>
+              <div class="nft-tribe">Listed by: \${listing.seller}</div>
+              <div class="nft-actions">
+                <button class="nft-btn" onclick='openBuyModal(\${JSON.stringify(listing)})'>Buy</button>
+              </div>
+            </div>
+          </div>
+        \`).join('');
+      } else {
+        grid.innerHTML = '<div class="empty-state"><h2>No Listings</h2></div>';
+      }
+    }
+
+    async function loadInventory() {
+      const data = await api('get_user_inventory');
+      const grid = document.getElementById('inventoryGrid');
+      const count = data.inventory ? data.inventory.length : 0;
+      document.getElementById('inventoryCount').textContent = count + ' NFTs';
+
+      if (data.ok && data.inventory && data.inventory.length > 0) {
+        grid.innerHTML = data.inventory.map((nft, i) => \`
+          <div class="nft-card">
+            <div style="position: relative;">
+              <img src="\${nft.image}" alt="\${nft.name}" class="nft-image" onerror="this.src='https://via.placeholder.com/280x250?text=NFT'">
+            </div>
+            <div class="nft-info">
+              <div class="nft-name">\${nft.name}</div>
+              <div class="nft-tribe">\${nft.tribe}</div>
+              <div class="nft-actions">
+                <button class="nft-btn" onclick='openListModal(\${JSON.stringify(nft)})'>List</button>
+              </div>
+            </div>
+          </div>
+        \`).join('');
+      } else {
+        grid.innerHTML = '<div class="empty-state"><h2>No NFTs</h2></div>';
+      }
+    }
+
+    async function loadListings() {
+      const data = await api('get_user_listings');
+      const grid = document.getElementById('listingsGrid');
+
+      if (data.ok && data.listings && data.listings.length > 0) {
+        grid.innerHTML = data.listings.map(listing => \`
+          <div class="nft-card">
+            <div style="position: relative;">
+              <img src="\${listing.nft_image}" alt="\${listing.nft_name}" class="nft-image" onerror="this.src='https://via.placeholder.com/280x250?text=NFT'">
+            </div>
+            <div class="nft-info">
+              <div class="nft-name">\${listing.nft_name}</div>
+              <div class="nft-price">\${listing.price} MUDD</div>
+              <div class="nft-actions">
+                <button class="nft-btn" onclick='cancelListing("\${listing.listing_id}")' style="background: linear-gradient(135deg, #ff6b6b 0%, #ff4444 100%);">Cancel</button>
+              </div>
+            </div>
+          </div>
+        \`).join('');
+      } else {
+        grid.innerHTML = '<div class="empty-state"><h2>No Active Listings</h2></div>';
+      }
+    }
+
+    async function loadActivity() {
+      const data = await api('get_transactions');
+      const container = document.getElementById('activityGrid');
+
+      if (data.ok && data.transactions && data.transactions.length > 0) {
+        container.innerHTML = data.transactions.map(tx => \`
+          <div class="leaderboard-item">
+            <div>
+              <div class="leaderboard-name">\${tx.type === 'purchase' ? '💳 Purchase' : '⛏️ Mint'}</div>
+              <div style="color: #a0c0ff; font-size: 0.9em;">\${new Date(tx.timestamp).toLocaleDateString()}</div>
+            </div>
+            <div class="leaderboard-value">\${tx.price || tx.total_cost} MUDD</div>
+          </div>
+        \`).join('');
+      } else {
+        container.innerHTML = '<div class="empty-state"><h2>No Activity</h2></div>';
+      }
+    }
+
+    async function updateStats() {
+      const data = await api('get_stats');
+      if (data.ok) {
+        document.getElementById('totalNfts').textContent = data.stats.total_nfts_catalog;
+        document.getElementById('activeListings').textContent = data.stats.active_listings;
+        document.getElementById('salesVolume').textContent = data.stats.total_volume;
+        document.getElementById('completedSales').textContent = data.stats.completed_sales;
+      }
+    }
+
+    function setupNav() {
+      document.querySelectorAll('.nav-tab').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+          
+          e.target.classList.add('active');
+          const tab = e.target.dataset.tab + '-tab';
+          document.getElementById(tab).classList.add('active');
+        });
+      });
+    }
+
+    function openModal(id) { document.getElementById(id).classList.add('active'); }
+    function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+
+    function connectWallet() { openModal('walletModal'); }
+
+    async function handleWalletConnect(e) {
+      e.preventDefault();
+      const wallet = document.getElementById('walletInput').value;
+      const data = await api('link_wallet', { wallet_address: wallet });
+      
+      if (data.ok) {
+        currentUser.wallet = wallet;
+        document.getElementById('walletDisplay').textContent = wallet.substring(0, 10) + '...';
+        closeModal('walletModal');
+        alert('✅ Wallet connected!');
+      } else {
+        alert('❌ Error: ' + data.error);
+      }
+    }
+
+    function openMintModal(nft) {
+      selectedNft = nft;
+      document.getElementById('mintContent').innerHTML = \`
+        <div style="text-align: center; margin-bottom: 20px;">
+          <img src="\${nft.image}" style="width: 100%; border-radius: 8px; margin-bottom: 15px;">
+          <div class="nft-name">\${nft.name}</div>
+          <div class="nft-price">\${nft.price_mudd} MUDD</div>
+        </div>
+        <form onsubmit="handleMint(event)">
+          <div class="form-group">
+            <label class="form-label">Quantity</label>
+            <input type="number" id="mintQty" class="form-input" value="1" min="1" required>
+          </div>
+          <button type="submit" style="width: 100%;">Confirm Mint</button>
+        </form>
+      \`;
+      openModal('mintModal');
+    }
+
+    async function handleMint(e) {
+      e.preventDefault();
+      const qty = parseInt(document.getElementById('mintQty').value);
+      const data = await api('request_mint', { nft_key: selectedNft.key, quantity: qty });
+      
+      if (data.ok) {
+        closeModal('mintModal');
+        alert('✅ Mint successful! TX: ' + data.tx_id);
+        await loadAll();
+      } else {
+        alert('❌ Error: ' + data.error);
+      }
+    }
+
+    function openBuyModal(listing) {
+      document.getElementById('buyContent').innerHTML = \`
+        <div style="text-align: center; margin-bottom: 20px;">
+          <img src="\${listing.nft_image}" style="width: 100%; border-radius: 8px; margin-bottom: 15px;">
+          <div class="nft-name">\${listing.nft_name}</div>
+          <div class="nft-price">\${listing.listing_price} MUDD</div>
+        </div>
+        <button style="width: 100%; margin-bottom: 10px;" onclick='processBuy("\${listing.listing_id}")'>Confirm Purchase</button>
+        <button style="width: 100%; background: rgba(0, 255, 255, 0.2);" onclick="closeModal('buyModal')">Cancel</button>
+      \`;
+      openModal('buyModal');
+    }
+
+    async function processBuy(listingId) {
+      const data = await api('buy_listing', { listing_id: listingId });
+      if (data.ok) {
+        closeModal('buyModal');
+        alert('✅ Purchase successful!');
+        await loadAll();
+      } else {
+        alert('❌ Error: ' + data.error);
+      }
+    }
+
+    function openListModal(nft) {
+      document.getElementById('listContent').innerHTML = \`
+        <form onsubmit="handleList(event, '\${nft.key}')">
+          <div class="form-group">
+            <label class="form-label">List Price (MUDD)</label>
+            <input type="number" class="form-input" id="listPrice" min="1" required>
+          </div>
+          <button type="submit" style="width: 100%;">List for Sale</button>
+        </form>
+      \`;
+      openModal('listModal');
+    }
+
+    async function handleList(e, nftKey) {
+      e.preventDefault();
+      const price = parseInt(document.getElementById('listPrice').value);
+      const data = await api('list_gear', { nft_key: nftKey, price });
+      
+      if (data.ok) {
+        closeModal('listModal');
+        alert('✅ Listed for sale!');
+        await loadAll();
+      } else {
+        alert('❌ Error: ' + data.error);
+      }
+    }
+
+    async function cancelListing(id) {
+      if (confirm('Cancel this listing?')) {
+        const data = await api('cancel_listing', { listing_id: id });
+        if (data.ok) {
+          alert('✅ Listing cancelled');
+          await loadAll();
+        } else {
+          alert('❌ Error: ' + data.error);
+        }
+      }
+    }
+
+    async function toggleLeaderboard() {
+      const data = await api('get_leaderboard');
+      if (data.ok) {
+        document.getElementById('topBuyers').innerHTML = data.top_buyers.map((b, i) => \`
+          <div class="leaderboard-item">
+            <div>#\${i + 1} \${b.user}</div>
+            <div class="leaderboard-value">\${b.spent} MUDD</div>
+          </div>
+        \`).join('');
+
+        document.getElementById('topSellers').innerHTML = data.top_sellers.map((s, i) => \`
+          <div class="leaderboard-item">
+            <div>#\${i + 1} \${s.user}</div>
+            <div class="leaderboard-value">\${s.earned} MUDD</div>
+          </div>
+        \`).join('');
+
+        openModal('leaderboardModal');
+      }
+    }
+
+    async function refreshUI() {
+      await loadAll();
+      alert('✅ Refreshed!');
+    }
+
+    window.addEventListener('DOMContentLoaded', initApp);
+  </script>
 </body>
-</html>
+</html>\`;
